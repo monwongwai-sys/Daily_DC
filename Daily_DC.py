@@ -26,6 +26,7 @@ style_css = """
         font-size: 14px;
         color: #555;
         margin-bottom: 0px;
+        font-weight: bold;
     }
     .latest-date-value {
         font-size: 32px;
@@ -37,12 +38,8 @@ style_css = """
     """
 st.markdown(style_css, unsafe_allow_html=True)
 
-# --- Updated Label Logic ---
+# --- 2. Helper Functions ---
 def get_custom_labels(df, column_name, label_type="actual", prefix_col=None, precision=2, is_integer=False):
-    """
-    label_type="actual": Show First and Last
-    label_type="plan": Show Last only
-    """
     labels = [""] * len(df)
     if df.empty: return labels
 
@@ -60,7 +57,6 @@ def get_custom_labels(df, column_name, label_type="actual", prefix_col=None, pre
         labels[-1] = fmt(len(df)-1)
     elif label_type == "plan":
         labels[-1] = fmt(len(df)-1)
-        
     return labels
 
 def get_y_range(df, columns, padding_top=0.5, padding_bottom=0.2):
@@ -69,7 +65,6 @@ def get_y_range(df, columns, padding_top=0.5, padding_bottom=0.2):
     v_min, v_max = all_values.min(), all_values.max()
     spread = v_max - v_min
     if spread == 0: return [v_min * 0.7, v_max * 1.5]
-    # Increased padding to prevent labels from being cut off at the top
     return [v_min - (spread * padding_bottom), v_max + (spread * padding_top)]
 
 def label_style(color, size=11):
@@ -88,10 +83,11 @@ COLORS = {
 }
 CHART_CONFIG = {'displayModeBar': False}
 
+# --- 3. Data Loading ---
 try:
-    df = pd.read_excel("Actual vs Plan.xlsx", engine="openpyxl")
+    df_raw = pd.read_excel("Actual vs Plan.xlsx", engine="openpyxl")
     cols = [1, 15, 16, 17, 26, 27, 28, 7, 8, 29, 30, 11, 31, 12, 32, 22, 23, 36]
-    chart_data = df.iloc[:, cols].copy()
+    chart_data = df_raw.iloc[:, cols].copy()
     chart_data.columns = [
         'Date', 'CF_Actual', 'Yield_C_Act', 'Yield_B_Act', 'CF_Target', 'Yield_C_Plan', 'Yield_B_Plan',
         'FS_C_Act', 'FS_B_Act', 'FS_C_Plan', 'FS_B_Plan', 'Vin_Act', 'Vin_Plan', 'Sale_Act', 'Sale_Plan',
@@ -100,28 +96,36 @@ try:
     chart_data['Date'] = pd.to_datetime(chart_data['Date'], errors='coerce')
     chart_data = chart_data.dropna(subset=['Date']).sort_values('Date')
 
-    # --- Header ---
+    # --- 4. Sidebar / Settings ---
     head_col, set_col = st.columns([2, 1])
-    with head_col:
-        st.title("🚀 DC Daily Production Dashboard")
-        latest_date = chart_data['Date'].max()
-        st.markdown(f"""
-            <div class="latest-date-box">
-                <p class="latest-date-text">LATEST DATA UPDATE AS OF</p>
-                <p class="latest-date-value">{latest_date.strftime('%d %B %Y') if pd.notnull(latest_date) else 'N/A'}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
+    
     with set_col:
         st.write("##") 
         with st.expander("⚙️ REPORT SETTINGS", expanded=True):
             date_range = st.date_input("Select Date Range", value=(date(2026, 1, 1), date(2026, 1, 31)))
 
+    # --- 5. Logic & Visualization ---
     if isinstance(date_range, tuple) and len(date_range) == 2:
-        data = chart_data[(chart_data['Date'].dt.date >= date_range[0]) & (chart_data['Date'].dt.date <= date_range[1])]
+        # Filter Data based on selected range
+        data = chart_data[(chart_data['Date'].dt.date >= date_range[0]) & 
+                          (chart_data['Date'].dt.date <= date_range[1])]
         
+        # แสดง Header ตามข้อมูลที่ถูก Filter
+        with head_col:
+            st.title("🚀 DC Daily Production Dashboard")
+            # ดึงวันที่ล่าสุดจากข้อมูลที่เลือก (Filter แล้ว)
+            latest_selected_date = data['Date'].max() if not data.empty else None
+            
+            date_str = latest_selected_date.strftime('%d %B %Y').upper() if pd.notnull(latest_selected_date) else 'N/A'
+            
+            st.markdown(f"""
+                <div class="latest-date-box">
+                    <p class="latest-date-text">LATEST DATA UPDATE AS OF</p>
+                    <p class="latest-date-value">{date_str}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
         if not data.empty:
-            # Added more right margin (r=120) to ensure text labels aren't cut off
             COMMON_LAYOUT = dict(template="plotly_white", height=400, margin=dict(t=50, b=20, l=50, r=120), xaxis=dict(automargin=True), showlegend=False)
 
             # --- Row 1 ---
@@ -177,11 +181,12 @@ try:
             with c6:
                 st.subheader("6. Ethanol Production")
                 fig6 = go.Figure()
-                # Both Actual and Plan now use 'Eth_Name' as a prefix
                 fig6.add_trace(go.Scatter(x=data['Date'], y=data['Eth_Act'], mode='lines+markers+text', text=get_custom_labels(data, 'Eth_Act', "actual", prefix_col='Eth_Name', is_integer=True), textposition="top center", cliponaxis=False, textfont=label_style(COLORS['ETH_ACT']), line=dict(color=COLORS['ETH_ACT'], width=3), fill='tozeroy', fillcolor=COLORS['ETH_FILL']))
                 fig6.add_trace(go.Scatter(x=data['Date'], y=data['Eth_Plan'], mode='lines+text', text=get_custom_labels(data, 'Eth_Plan', "plan", prefix_col='Eth_Name', is_integer=True), textposition="bottom right", cliponaxis=False, textfont=label_style(COLORS['RED_PLAN']), line=dict(color=COLORS['RED_PLAN'], width=2, dash='dot')))
                 fig6.update_layout(**COMMON_LAYOUT, yaxis=dict(range=get_y_range(data, ['Eth_Act', 'Eth_Plan'])))
                 st.plotly_chart(fig6, use_container_width=True, config=CHART_CONFIG)
+        else:
+            st.warning("No data found for the selected date range.")
 
 except Exception as e:
     st.error(f"System Error: {e}")
